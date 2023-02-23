@@ -352,66 +352,32 @@ static void MX_CAN2_Init(void)
   CAN_FilterTypeDef  sFilterConfig;
 
   /*##-2- Configure the CAN Filter ###########################################*/
-  sFilterConfig.SlaveStartFilterBank = 14;
   sFilterConfig.FilterBank = 14;
   sFilterConfig.FilterMode = CAN_FILTERMODE_IDMASK;
-  sFilterConfig.FilterScale = CAN_FILTERSCALE_16BIT;
-
-  // IDs that will be accepted: SYNC 0x80
-  sFilterConfig.FilterIdHigh = 0x0080 << 5;
-  sFilterConfig.FilterMaskIdHigh = 0xFFFF << 5;
-
-  // IDs that will be accepted: Emergency ID 0x0081 ~ 0x00FF
-  sFilterConfig.FilterIdLow = 0x0081 << 5;
-  sFilterConfig.FilterMaskIdLow = 0xFF80 << 5;
-
-  sFilterConfig.FilterFIFOAssignment = CAN_RX_FIFO1;
+  sFilterConfig.FilterScale = CAN_FILTERSCALE_32BIT;
+  sFilterConfig.FilterIdHigh = 0x0000;
+  sFilterConfig.FilterIdLow = 0x0000;
+  sFilterConfig.FilterMaskIdHigh = 0x0000;
+  sFilterConfig.FilterMaskIdLow = 0x0000;
+  sFilterConfig.FilterFIFOAssignment = CAN_RX_FIFO0;
   sFilterConfig.FilterActivation = ENABLE;
+  sFilterConfig.SlaveStartFilterBank = 14;
 
   if ( HAL_CAN_ConfigFilter( &hcan2, &sFilterConfig ) != HAL_OK) {
 	  return;
       /* Filter configuration Error */
       Error_Handler();
   }
-  // -----------------------------------------------------------
-
-  // IDs that will be accepted: hmi20 node id XX7B
-  sFilterConfig.FilterBank = 15;
-  sFilterConfig.FilterIdHigh = 0x007B << 5;
-  sFilterConfig.FilterMaskIdHigh = 0x007F << 5;
-
-  // IDs that will be accepted: 0x0
-  sFilterConfig.FilterIdLow = 0x0000 << 5;
-  sFilterConfig.FilterMaskIdLow = 0x7F << 5;
-
   sFilterConfig.FilterFIFOAssignment = CAN_RX_FIFO1;
-  sFilterConfig.FilterActivation = ENABLE;
 
   if ( HAL_CAN_ConfigFilter( &hcan2, &sFilterConfig ) != HAL_OK) {
 	  return;
       /* Filter configuration Error */
       Error_Handler();
   }
-  //-----------------------------------------------------------
 
-  // IDs that will be accepted: hmi20 node id 0x580 + VCM node ID
-  sFilterConfig.FilterBank = 16;
-  sFilterConfig.FilterIdHigh = ( 0x581 ) << 5;
-  sFilterConfig.FilterMaskIdHigh = 0x05FF << 5;
-
-  // IDs that will be accepted: 0x0
-  sFilterConfig.FilterIdLow = 0x0000 << 5;
-  sFilterConfig.FilterMaskIdLow = 0x7F << 5;
-
-  sFilterConfig.FilterFIFOAssignment = CAN_RX_FIFO1;
-  sFilterConfig.FilterActivation = ENABLE;
-
-  if ( HAL_CAN_ConfigFilter( &hcan2, &sFilterConfig ) != HAL_OK) {
-	  return;
-      /* Filter configuration Error */
-      Error_Handler();
-  }
-  //-----------------------------------------------------------
+//  HAL_CAN_RegisterCallback(&hcan2, HAL_CAN_RX_FIFO0_MSG_PENDING_CB_ID, CustomCAN_RxFifoMsgPendingCallback );
+//  HAL_CAN_RegisterCallback(&hcan2, HAL_CAN_RX_FIFO1_MSG_PENDING_CB_ID, CustomCAN_RxFifoMsgPendingCallback );
 
   /*##-3- Start the CAN peripheral ###########################################*/
   if( HAL_CAN_Start( &hcan2 ) != HAL_OK ) {
@@ -430,6 +396,11 @@ static void MX_CAN2_Init(void)
   if( HAL_CAN_ActivateNotification( &hcan2, CAN_IT_RX_FIFO1_MSG_PENDING ) != HAL_OK) {
 	  return;
 	  /* Notification Error */
+      Error_Handler();
+  }
+
+  if( HAL_CAN_ActivateNotification( &hcan2, CAN_IT_TX_MAILBOX_EMPTY	) != HAL_OK) {
+      /* Notification Error */
       Error_Handler();
   }
   /* USER CODE END CAN2_Init 2 */
@@ -1126,45 +1097,52 @@ void MX_SDRAM_InitEx(void)
   HAL_SDRAM_ProgramRefreshRate(&hsdram2, REFRESH_COUNT);
 }
 
-/**
-  * @brief  Tx Transfer completed callback
-  * @param  UartHandle: UART handle.
-  * @note   This example shows a simple way to report end of DMA Tx transfer, and
-  *         you can add your own implementation.
-  * @retval None
-  */
-void HAL_UART_TxCpltCallback(UART_HandleTypeDef *UartHandle)
+void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan)
 {
-	/* Set transmission flag: trasfer complete*/
-//	pxMBFrameCBTransmitterEmpty( );
+	  CAN_RxHeaderTypeDef RxHeader;
+	  Message rxMSG;
+	  CAN_TxHeaderTypeDef TxHeader;
+	  uint8_t TxData[8];
+	  uint32_t TxMailbox;
+	  // Get RX message and release fifo
+	  if (HAL_CAN_GetRxMessage(hcan, CAN_RX_FIFO0, &RxHeader, rxMSG.data) != HAL_OK)
+	    Error_Handler();
+
+	  TxHeader.StdId = RxHeader.StdId;
+	  TxHeader.ExtId = 0x00;
+	  TxHeader.RTR = ( RxHeader.RTR == CAN_RTR_REMOTE ) ? 1 : 0;
+	  TxHeader.IDE = CAN_ID_STD;
+	  TxHeader.DLC = RxHeader.DLC;
+	  TxHeader.TransmitGlobalTime = DISABLE;
+
+	  for (uint8_t i = 0; i < 8; i++)
+		  TxData[i] = rxMSG.data[i];
+
+	  HAL_CAN_AddTxMessage(hcan, &TxHeader, TxData, &TxMailbox);
 }
 
-/**
-  * @brief  Rx Transfer completed callback
-  * @param  UartHandle: UART handle
-  * @note   This example shows a simple way to report end of DMA Rx transfer, and
-  *         you can add your own implementation.
-  * @retval None
-  */
-void HAL_UART_RxCpltCallback(UART_HandleTypeDef *UartHandle)
+void HAL_CAN_RxFifo1MsgPendingCallback(CAN_HandleTypeDef *hcan)
 {
+	  CAN_RxHeaderTypeDef RxHeader;
+	  Message rxMSG;
+	  CAN_TxHeaderTypeDef TxHeader;
+	  uint8_t TxData[8];
+	  uint32_t TxMailbox;
+	  // Get RX message and release fifo
+	  if (HAL_CAN_GetRxMessage(hcan, CAN_RX_FIFO1, &RxHeader, rxMSG.data) != HAL_OK)
+	    Error_Handler();
 
-//	if(UartHandle->Instance == USART3)
-//	{
-//		usart3_flag = 1;
-//		usart1_flag = 0;
-//		pxMBFrameCBByteReceived();
-//		HAL_UART_Receive_IT( &huart3, usart3_rx_data_buff, 1 );
-//	}
-//	else if(UartHandle->Instance == USART1)
-//	{
-//		usart1_flag = 1;
-//		usart3_flag = 0;
-//		pxMBFrameCBByteReceived();
-//		HAL_UART_Receive_IT( &huart1, usart1_rx_data_buff, 1 );
-//	}
+	  TxHeader.StdId = RxHeader.StdId;
+	  TxHeader.ExtId = 0x00;
+	  TxHeader.RTR = ( RxHeader.RTR == CAN_RTR_REMOTE ) ? 1 : 0;
+	  TxHeader.IDE = CAN_ID_STD;
+	  TxHeader.DLC = RxHeader.DLC;
+	  TxHeader.TransmitGlobalTime = DISABLE;
 
+	  for (uint8_t i = 0; i < 8; i++)
+		  TxData[i] = rxMSG.data[i];
 
+	  HAL_CAN_AddTxMessage(hcan, &TxHeader, TxData, &TxMailbox);
 }
 
 /* USER CODE END 4 */
